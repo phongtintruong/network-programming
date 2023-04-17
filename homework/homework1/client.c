@@ -11,7 +11,6 @@ int main()
 {
     int client = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    inet_addr
 
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;

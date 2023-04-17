@@ -1,150 +1,112 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <netinet/in.h>
+#include <netdb.h>
+#include <string.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
 
-#define MAX_CLIENTS 10
-#define BUFFER_SIZE 256
+int main(int argc, char *argv[]){
+    if (argc!=4){
+        printf("Usage: %s <port> <greeting file> <output file>\n", argv[0]);
+        return 1;
+    }
 
-void handle_client(int client_sock, int data_fd)
-{
-    char buffer[BUFFER_SIZE];
-    ssize_t bytes_received;
-    ssize_t bytes_written;
+    int port = atoi(argv[1]);
 
-    // Send greeting message to client
-    int greeting_fd = open("greeting.txt", O_RDONLY);
-    if (greeting_fd == -1)
+    int server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    if (server == -1){
+        perror("Socket() failed");
+        return 1;
+    }
+
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+
+    if (bind(server, (struct sockaddr *)&addr, sizeof(addr))){
+        perror("bind() failed");
+        return 1;
+    }
+
+    if (listen(server, 5)){ // max_clients is 5
+        perror("listen() failed");
+        return 1;
+    }
+
+    struct sockaddr_in clientAddr;
+    int clientAddrlen = sizeof(addr);
+
+    int client = accept(server, (struct sockaddr *)&clientAddr, &clientAddrlen);
+
+    if (client==-1){
+        perror("Accept() failed");
+        return 1;
+    }
+
+    printf("Client IP: %s:%d\n", inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+
+    int greeting = open(argv[2], O_RDONLY);
+
+    if (greeting==-1){
+        perror("Open() failed");
+        return 1;
+    }
+
+    char greeting_msg[256];
+    int bytes_read = read(greeting, greeting_msg, sizeof(greeting_msg));
+    if (bytes_read == -1)
     {
+        perror("read() failed");
+        return 1;
+    }
+    greeting_msg[bytes_read] = '\n';
+
+    int ret = send(client, greeting_msg, strlen(greeting_msg), 0);
+    if (ret != -1){
+        printf("%d bytes are sent\n", bytes_read);
+    }
+
+    int output = open(argv[3], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (output == -1){
         perror("open() failed");
-        return;
+        return 1;
     }
 
-    while ((bytes_received = read(greeting_fd, buffer, BUFFER_SIZE)) > 0)
+    char buf[256];
+    bytes_read = recv(client, buf, sizeof(buf), 0);
+    while (bytes_read > 0)
     {
-        bytes_written = send(client_sock, buffer, bytes_received, 0);
-        if (bytes_written == -1)
-        {
-            perror("send() failed");
-            close(greeting_fd);
-            return;
-        }
-    }
+        buf[bytes_read] = '\0';
+        printf("Received %d bytes: %s\n", bytes_read, buf);
 
-    close(greeting_fd);
-
-    // Receive data from client and write to file
-    while ((bytes_received = recv(client_sock, buffer, BUFFER_SIZE, 0)) > 0)
-    {
-        bytes_written = write(data_fd, buffer, bytes_received);
-        if (bytes_written == -1)
+        ret = write(output, buf, bytes_read);
+        if (ret == -1)
         {
             perror("write() failed");
-            return;
-        }
-    }
-
-    if (bytes_received == -1)
-    {
-        perror("recv() failed");
-    }
-}
-
-int main(int argc, char *argv[])
-{
-    if (argc != 4)
-    {
-        printf("Usage: %s <port> <greeting_file> <data_file>\n", argv[0]);
-        return 1;
-    }
-
-    int server_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (server_sock == -1)
-    {
-        perror("socket() failed");
-        return 1;
-    }
-
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(atoi(argv[1]));
-
-    if (bind(server_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
-    {
-        perror("bind() failed");
-        close(server_sock);
-        return 1;
-    }
-
-    if (listen(server_sock, MAX_CLIENTS) == -1)
-    {
-        perror("listen() failed");
-        close(server_sock);
-        return 1;
-    }
-
-    int data_fd = open(argv[3], O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    if (data_fd == -1)
-    {
-        perror("open() failed");
-        close(server_sock);
-        return 1;
-    }
-
-    printf("Server started. Listening on port %s\n", argv[1]);
-
-    while (1)
-    {
-        struct sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
-        int client_sock = accept(server_sock, (struct sockaddr *)&client_addr, &client_len);
-        if (client_sock == -1)
-        {
-            perror("accept() failed");
-            close(server_sock);
-            close(data_fd);
             return 1;
         }
 
-        char client_ip[INET_ADDRSTRLEN];
-        if (inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN) == NULL)
-        {
-            perror("inet_ntop() failed");
-            close(client_sock);
-            continue;
-        }
-
-        printf("Client connected: %s:%d\n", client_ip, ntohs(client_addr.sin_port));
-
-        // Handle client communication in a new process
-        pid_t pid = fork();
-        if (pid == -1)
-        {
-            perror("fork() failed");
-            close(client_sock);
-            continue;
-        }
-
-        if (pid == 0) // Child process
-        {
-            close(server_sock); // Close the listening socket in the child process
-            handle_client(client_sock, data_fd);
-            close(client_sock);
-            exit(0);
-        }
-
-        // Parent process
-        close(client_sock); // Close the client socket in the parent process
+        bytes_read = recv(client, buf, sizeof(buf), 0);
     }
 
-    close(data_fd);
-    close(server_sock);
-return 0;
+    if (bytes_read == -1)
+    {
+        perror("recv() failed");
+        return 1;
+    }
+
+    printf("Connection closed\n");
+
+    close(output);
+    close(client);
+    close(server);
+
+    return 0;
+
 }
