@@ -40,7 +40,7 @@ int main(int argc, char *argv[]){
     }
 
     struct sockaddr_in clientAddr;
-    int clientAddrlen = sizeof(addr);
+    int clientAddrlen = sizeof(clientAddr);
 
     int client = accept(server, (struct sockaddr *)&clientAddr, &clientAddrlen);
 

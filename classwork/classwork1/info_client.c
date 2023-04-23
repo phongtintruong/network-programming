@@ -7,8 +7,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-#define MAX_DRIVES 10
-#define BUFFER_SIZE 1024
 
 int main(int argc, char *argv[])
 {
@@ -17,6 +15,9 @@ int main(int argc, char *argv[])
         printf("Usage: %s <server_ip> <server_port>\n", argv[0]);
         return 1;
     }
+
+    char *ip = argv[1];
+    int port = atoi(argv[2]);
 
     // Create socket
     int client_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -30,8 +31,8 @@ int main(int argc, char *argv[])
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr(argv[1]);
-    server_addr.sin_port = htons(atoi(argv[2]));
+    server_addr.sin_addr.s_addr = inet_addr(ip);
+    server_addr.sin_port = htons(port);
 
     if (connect(client_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
     {
@@ -40,53 +41,68 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    char buf[256];
+
     // Get computer name from user
-    char computer_name[BUFFER_SIZE];
-    printf("Tên máy tính: ");
-    fgets(computer_name, BUFFER_SIZE, stdin);
-    computer_name[strlen(computer_name)-1] = '\0';
+    char computer_name[64];
+    printf("Enter computer name: ");
+    scanf("%s",computer_name);
+    getchar();
+
+    // fgets(computer_name, 64, stdin);
+    // computer_name[strlen(computer_name)-1] = '\0';
     // printf("%s", computer_name);
+
+    // Put in buff
+    strcpy(buf, computer_name);
+    int pos = strlen(computer_name);
+    buf[pos]=0;
+    pos++;
+
     // Get number of drive from user
-    int num_drives;
-    printf("Số ổ đĩa: ");
-    scanf("%d", &num_drives);
-    int c;
-    while ((c = getchar()) != '\n' && c != EOF) { }
-
-
+    int num_disks;
+    printf("Enter number of disk: ");
+    scanf("%d", &num_disks);
+    getchar();
+    // int c;
+    // while ((c = getchar()) != '\n' && c != EOF) { }
 
     // Get drive information from user
-    char drive_info[MAX_DRIVES][BUFFER_SIZE];
-    int index_drive = 0;
+    char disk_letter;
+    short int disk_size;
 
-    while (index_drive < num_drives)
-    {
-        printf("Nhập thông tin drive %d: ", index_drive+1);
-        fgets(drive_info[index_drive], BUFFER_SIZE, stdin);
+    for (int i=0; i<num_disks;i++){
+        printf("Enter disk name: ");
+        scanf("%c",&disk_letter);
 
-        if (strcmp(drive_info[index_drive], "\n") == 0)  // Empty string signals end of input
-        {
-            break;
-        }
+        printf("Enter storage of disk: ");
+        scanf("%hd", &disk_size);
 
-        index_drive++;
+        getchar();
+
+        // Put in buff
+        buf[pos]=disk_letter;
+        pos++;
+        memcpy(buf + pos, &disk_size, sizeof(disk_size));
+        pos+=sizeof(disk_size);
     }
-
+    
     // Send data to server
-    char message[BUFFER_SIZE];
-    int message_len = sprintf(message, "%s%d", computer_name, num_drives);
-
-    for (int i = 0; i < num_drives; i++)
-    {
-        message_len += sprintf(message + message_len, " %s", drive_info[i]);
-    }
-
-    if (send(client_sock, message, message_len, 0) == -1)
+    printf("Buffer size: %d\n",pos);
+    if (send(client_sock, buf, pos, 0) == -1)
     {
         perror("send() failed");
         close(client_sock);
         return 1;
     }
+    // char message[BUFFER_SIZE];
+    // int message_len = sprintf(message, "%s%d", computer_name, num_drives);
+
+    // for (int i = 0; i < num_drives; i++)
+    // {
+    //     message_len += sprintf(message + message_len, " %s", drive_info[i]);
+    // }
+
 
     close(client_sock);
 
