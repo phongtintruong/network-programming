@@ -11,6 +11,7 @@
 #include <time.h>
 
 struct Client {
+    int is_login;
     int login_failed_count;
     char username[100];
     char password[100];
@@ -128,12 +129,17 @@ int main(int argc, char *argv[]) {
                     printf("New user connected: %d\n", client);
                     fds[client_count+1].fd=client;
                     fds[client_count+1].events = POLLIN;
-                    client_count++;
+
+                    clients[client_count+1].is_login=0;
+                    clients[client_count+1].login_failed_count=0;
+                    strcpy(clients[client_count+1].password, "");
+                    strcpy(clients[client_count+1].username, "");    
 
                     char msg[256];
                     get_time_to_buf(msg);
                     strcat(msg, " Enter username: ");
                     send(client, msg, strlen(msg), 0);
+                    client_count++;
                 }
             }
         }
@@ -152,6 +158,7 @@ int main(int argc, char *argv[]) {
                         fds[i] = fds[client_count];
                         clients[i]=clients[client_count];
                     }
+                    clients[client_count].is_login=0;
                     clients[client_count].login_failed_count=0;
                     strcpy(clients[client_count].password, "");
                     strcpy(clients[client_count].username, "");                    
@@ -164,6 +171,7 @@ int main(int argc, char *argv[]) {
                         fds[i] = fds[client_count];
                         clients[i]=clients[client_count];
                     }
+                    clients[client_count].is_login=0;
                     clients[client_count].login_failed_count=0;
                     strcpy(clients[client_count].password, "");
                     strcpy(clients[client_count].username, "");                    
@@ -196,6 +204,7 @@ int main(int argc, char *argv[]) {
                             strcpy(clients[i].password, password);
                             
                             if (authenticate(&clients[i])){
+                                clients[i].is_login=1;
                                 char msg[256];
                                 get_time_to_buf(msg);
                                 strcat(msg, " Login successful.\n");
@@ -203,6 +212,7 @@ int main(int argc, char *argv[]) {
                             } else {
                                 if (clients[i].login_failed_count<3){
                                     clients[i].login_failed_count++;
+                                    clients[client_count].is_login=0;
                                     printf("client %d fail login %d time.\n", fds[i].fd, clients[i].login_failed_count);
                                     strcpy(clients[i].password, "");
                                     strcpy(clients[i].username, "");   
@@ -221,6 +231,7 @@ int main(int argc, char *argv[]) {
                                         fds[i] = fds[client_count];
                                         clients[i]=clients[client_count];
                                     }
+                                    clients[client_count].is_login=0;
                                     clients[client_count].login_failed_count=0;
                                     strcpy(clients[client_count].password, "");
                                     strcpy(clients[client_count].username, "");                    
@@ -234,21 +245,23 @@ int main(int argc, char *argv[]) {
                             strcat(msg, " Wrong usage. Password must not have space.\nEnter password: ");
                             send(fds[i].fd, msg, strlen(msg), 0);
                         }
-                    } else {
+                    } else if (clients[i].is_login){
                         // Execute command and send result back to the client
-                        FILE* command_output = popen(buffer, "r");
-                        if (command_output != NULL) {
-                            char command_result[1000];
-                            memset(command_result, 0, sizeof(command_result));
-
-                            while (fgets(command_result, sizeof(command_result) - 1, command_output) != NULL) {
-                                // Send each line of command output to the client
-                                send(fds[i].fd, command_result, strlen(command_result), 0);
-                                memset(command_result, 0, sizeof(command_result));
+                        char cmd[256];
+                        strcpy(cmd, buffer);
+                        strcat(cmd, " > out.txt");
+                        system(cmd);
+                        FILE *result = fopen("out.txt", "r");
+                        int ret = 0;
+                        char sendbuf[1024];
+                        while(!feof(result)){
+                            ret = fread(sendbuf, 1, sizeof(sendbuf), result);
+                            if (ret<=0){
+                                break;
                             }
-
-                            pclose(command_output);
+                            send(fds[i].fd, sendbuf, strlen(sendbuf), 0);
                         }
+                        fclose(result);
                     }
                 }
             }
