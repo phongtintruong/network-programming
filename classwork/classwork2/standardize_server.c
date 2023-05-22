@@ -143,19 +143,40 @@ int main(int argc, char *argv[]) {
                     buf[ret] = 0;
                     printf("Received from %d: %s\n", fds[i].fd, buf);
                     
-                    char sendbuf[1024];
-                    char *token = strtok(buf, " ");
-                    while (token != NULL){
-                        token[0]=toupper(token[0]);
-                        for (int i=1;i<strlen(token);i++){
-                            token[i]=tolower(token[i]);
+                    // // Xóa ký tự newline từ buffer
+                    // int len = strlen(buf);
+                    // if (buf[len - 1] == '\n') {
+                    //     buf[len - 1] = '\0';
+                    // }
+
+                    if (strcmp(buf, "exit\n")==0){
+                        char msg[256];
+                        get_time_to_buf(msg);
+                        strcat(msg, " Bye Bye mfk.\n");
+                        send(fds[i].fd, msg, strlen(msg), 0);
+
+                        close(fds[i].fd);
+                        if (i<nfds-1){
+                            fds[i] = fds[nfds-1];
                         }
-                        strcat(sendbuf, token);
-                        strcat(sendbuf, " ");
-                        token=strtok(NULL, " ");
+                        nfds--;
+                        i--;
+                    } else {
+                        char sendbuf[1024];
+                        memset(sendbuf, 0, sizeof(sendbuf));
+                        char *token = strtok(buf, " ");
+                        while (token != NULL){
+                            token[0]=toupper(token[0]);
+                            for (int i=1;i<strlen(token);i++){
+                                token[i]=tolower(token[i]);
+                            }
+                            strcat(sendbuf, token);
+                            strcat(sendbuf, " ");
+                            token=strtok(NULL, " ");
+                        }
+                        sendbuf[strlen(sendbuf)-1]=0;
+                        send(fds[i].fd, sendbuf, strlen(sendbuf), 0);
                     }
-                    sendbuf[strlen(sendbuf)-1]=0;
-                    send(fds[i].fd, sendbuf, strlen(sendbuf), 0);
                 }
             }
         }
