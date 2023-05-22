@@ -1,171 +1,114 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-
 #include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 #include <sys/select.h>
 
-int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        printf("Usage: %s  <port>\n", argv[0]);
-        return 1;
+#define BUFFER_SIZE 4096
+
+void chat_client(const char* server_ip, int server_port, int client_port) {
+    // Tạo socket cho máy nhận và máy gửi
+    int server_socket, client_socket;
+    struct sockaddr_in server_address, client_address;
+
+    // Tạo socket cho máy nhận
+    server_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (server_socket < 0) {
+        perror("Error creating server socket");
+        exit(1);
     }
 
-    int port = atoi(argv[1]);
-    int max_noclient = atoi(argv[2]);
+    memset(&server_address, 0, sizeof(server_address));
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_port = htons(client_port);
 
-    int listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    if (listener == -1){
-        perror("socket() failed");
-        return 1;
+    if (bind(server_socket, (struct sockaddr*)&server_address, sizeof(server_address)) < 0) {
+        perror("Error binding server socket");
+        exit(1);
     }
 
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    addr.sin_port = htons(port);
-
-    if (bind(listener, (struct sockaddr *)&addr, sizeof(addr))){
-        perror("bind() failed");
-        return 1;
+    // Tạo socket cho máy gửi
+    client_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (client_socket < 0) {
+        perror("Error creating client socket");
+        exit(1);
     }
 
-    if (listen(listener, 5)){
-        perror("listen() failed");
-        return 1;
-    }
+    memset(&client_address, 0, sizeof(client_address));
+    client_address.sin_family = AF_INET;
+    client_address.sin_addr.s_addr = inet_addr(server_ip);
+    client_address.sin_port = htons(server_port);
 
-    fd_set fdread;
-    int clients[max_noclient];
-    char *client_id[max_noclient];
-    int client_state[max_noclient];
-    for (int i=0;i<max_noclient;i++){
-        client_state[i]=1;
-    }
-    int num_clients=0;
-    char buf[256];
-    struct timeval tv;
+    // Tạo danh sách các file descriptor cần theo dõi
+    fd_set read_fds;
+    int max_fd = (server_socket > STDIN_FILENO) ? server_socket : STDIN_FILENO;
+    char buffer[BUFFER_SIZE];
 
-    while(1){
-        FD_ZERO(&fdread);
-        FD_SET(listener, &fdread);
+    printf("Chat client started on port %d\n", client_port);
+    printf("Type 'exit' to quit.\n");
 
-        int maxdp = listener;
-        for (int i=0;i<num_clients;i++){
-            FD_SET(clients[i],&fdread);
-            if (clients[i]>maxdp){
-                maxdp=clients[i];
+    while (1) {
+        FD_ZERO(&read_fds);
+        FD_SET(STDIN_FILENO, &read_fds);
+        FD_SET(server_socket, &read_fds);
+
+        // Sử dụng select để theo dõi các socket có sẵn để đọc
+        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) < 0) {
+            perror("Error in select");
+            exit(1);
+        }
+
+        // Nhận dữ liệu từ server
+        if (FD_ISSET(server_socket, &read_fds)) {
+            struct sockaddr_in sender_address;
+            socklen_t sender_address_len = sizeof(sender_address);
+            int bytes_received = recvfrom(server_socket, buffer, BUFFER_SIZE, 0, (struct sockaddr*)&sender_address, &sender_address_len);
+
+            if (bytes_received < 0) {
+                perror("Error receiving data from server");
+                exit(1);
+            }
+
+            buffer[bytes_received] = '\0';
+            printf("[%s][%d]: %s\n", server_ip, server_port, buffer);
+        }
+
+        // Gửi dữ liệu từ client
+        if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+            fgets(buffer, BUFFER_SIZE, stdin);
+
+            // Xóa ký tự newline từ buffer
+            int len = strlen(buffer);
+            if (buffer[len - 1] == '\n') {
+                buffer[len - 1] = '\0';
+            }
+
+            sendto(client_socket, buffer, strlen(buffer), 0, (struct sockaddr*)&client_address, sizeof(client_address));
+
+            // Kiểm tra điều kiện thoát
+            if (strcmp(buffer, "exit") == 0) {
+                close(client_socket);
+                close(server_socket);
+                exit(0);
             }
         }
-
-        tv.tv_sec=60;
-        tv.tv_usec=0;
-
-        int ret = select(maxdp+1, &fdread, NULL, NULL, &tv);
-        if (ret<0){
-            perror("select() failed");
-            return 1;
-        }
-
-        if (ret==0){
-            printf("TIME OUT!!!\n");
-            continue;
-        }
-
-        if (FD_ISSET(listener, &fdread)){
-            int client = accept(listener, NULL, NULL);
-            if (client==-1){
-                perror("accept() failed");
-                // continue;
-            } else {
-                if (num_clients==max_noclient){
-                    int check = 0;
-                    for (int i=0;i<max_noclient;i++){
-                        if (client_state[i]==0){
-                            check++;
-                            printf("New user connected: %d\n", client);
-                            clients[i] = client;
-                            client_state[i]=1;
-                            break;                            
-                        }
-                    }
-                    if (check==0){
-                        char *msg = "number of clients limit exceeds, comeback later.\n";
-                        send(client, msg, strlen(msg), 0);
-                        printf("number of clients limit exceeds, excess client will not be processed\n");
-                        close(client);
-                    }
-                } else {
-                    printf("New user connected: %d\n", client);
-                    clients[num_clients]=client;
-                    client_state[num_clients]=1;
-                    num_clients++;
-                }
-            }
-        }
-
-        for (int i=0;i<num_clients;i++){
-            if (FD_ISSET(clients[i], &fdread)){
-                ret = recv(clients[i], buf, sizeof(buf), 0);
-                if (ret <= -1){
-                    perror("recv() failed");
-                    FD_CLR(clients[i], &fdread);
-                    close(clients[i]);
-                    client_state[i]=0;
-                    clients[i]=-1;
-                    continue;
-                } else if (ret==0){
-                    perror("client disconnected");
-                    FD_CLR(clients[i], &fdread);
-                    close(clients[i]);
-                    client_state[i]=0;
-                    clients[i]=-1;
-                    continue;
-                } else {
-                    buf[ret] = 0;
-                    printf("Received from %d: %s\n", clients[i], buf);
-                    if (client_state[i]==1){
-                        char cmd[32], id[32], tmp[32];
-                        ret = sscanf(buf, "%s%s%s", cmd, id, tmp);
-                        if (ret==2){
-                            if (strcmp(cmd, "client_id:")==0){
-                                char *msg = "You are signed in. Enter message.\n";
-                                send(clients[i], msg, strlen(msg), 0);
-
-                                client_id[i]=malloc(strlen(id)+1);
-                                strcpy(client_id[i], id);
-                                client_state[i]=2;
-                            } else {
-                                char *msg = "Wrong usage. Usage: client_id: <id>.\n";
-                                send(clients[i], msg, strlen(msg), 0);
-                            }
-                        } else {
-                            char *msg = "Wrong usage. Usage: client_id: <id>.\n";
-                            send(clients[i], msg, strlen(msg), 0);
-                        }
-                    } else {
-                        char sendbuf[256];
-
-                        strcpy(sendbuf, client_id[i]);
-                        strcat(sendbuf, ": ");
-                        strcat(sendbuf, buf);
-
-                        for (int j=0;j<num_clients;j++){
-                            if (client_state[j]==2&&j!=i){
-                                send(clients[j], sendbuf, strlen(sendbuf), 0);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
     }
-    close(listener);
+}
+
+int main(int argc, char* argv[]) {
+    if (argc < 4) {
+        printf("Usage: %s <server_ip> <server_port> <client_port>\n", argv[0]);
+        exit(1);
+    }
+
+    const char* server_ip = argv[1];
+    int server_port = atoi(argv[2]);
+    int client_port = atoi(argv[3]);
+
+    chat_client(server_ip, server_port, client_port);
+
     return 0;
 }
