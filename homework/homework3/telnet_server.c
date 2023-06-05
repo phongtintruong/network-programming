@@ -184,7 +184,7 @@ int main(int argc, char *argv[]) {
                     if (strlen(clients[i].username)==0){
                         
                         char username[32], tmp[32];
-                        ret = sscanf(buffer, "%s%s%s", username, tmp);
+                        ret = sscanf(buffer, "%s%s", username, tmp);
                         if (ret==1){
                             strcpy(clients[i].username, username);
                             char msg[256];
