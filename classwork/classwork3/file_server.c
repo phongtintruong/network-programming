@@ -10,6 +10,8 @@
 #include <time.h>
 #include <sys/wait.h>
 #include <signal.h>
+// #define _DEFAULT_SOURCE
+
 #include <dirent.h>
 
 int client_count=0;
@@ -52,13 +54,15 @@ void signalHandler(int signo){
 }
 
 int main(int argc, char *argv[]){
-    if (argc != 3){
-        printf("Usage: %s <port> <max number of client>\n", argv[0]);
+    if (argc != 4){
+        printf("Usage: %s <port> <max number of client> <dir>\n", argv[0]);
         return 1;
     }
 
     int port = atoi(argv[1]);
     int max_noclient = atoi(argv[2]);
+    char search_dir[32];
+    strcpy(search_dir, argv[3]);
 
     int listener = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
@@ -73,7 +77,7 @@ int main(int argc, char *argv[]){
     addr.sin_port = htons(port);
 
     if (bind(listener, (struct sockaddr *)&addr, sizeof(addr))){
-        perror("bind() failed");
+        perror("bind() failed");    
         return 1;
     }
 
@@ -97,7 +101,7 @@ int main(int argc, char *argv[]){
         } else {
             if (client_count==max_noclient){
                 char msg[256];
-                get_time_to_buf(msg, "default");
+                // get_time_to_buf(msg, "default");
                 strcat(msg, " number of clients limit exceeds, comeback later.\n");
                 send(client, msg, strlen(msg), 0);
                 printf("number of clients limit exceeds, excess client will not be processed\n");
@@ -113,17 +117,21 @@ int main(int argc, char *argv[]){
                     char *file_list = malloc(1);
                     file_list = "\0";
 
-                    DIR *dir = opendir(".");
+
+                    DIR *dir = opendir(search_dir);
                     struct dirent *entry;
                     int count=0;
                     char count_str[20];
                     while ((entry = readdir(dir))!=NULL){
-                        count++;
-                        file_list = realloc(file_list, strlen(file_list)+strlen(entry->d_name)+3);
-                        strcat(file_list, entry->d_name);
-                        strcat(file_list, "\r\n");
+                        if (entry->d_type==DT_REG){
+                            count++;
+                            file_list = realloc(file_list, strlen(file_list)+strlen(entry->d_name)+3);
+                            strcat(file_list, entry->d_name);
+                            strcat(file_list, "\r\n");
+                        }
                     }
-                    if (count){
+                    closedir(dir);
+                    if (count>0){
                         sprintf(count_str, "%d", count);
                         strcat(file_list, "\r\n");
                         strcat(msg, "OK ");
@@ -131,65 +139,74 @@ int main(int argc, char *argv[]){
                         strcat(msg, "\r\n");
                         send(client, msg, strlen(msg), 0);
                     } else {
+                        printf("nofile\n");
                         strcat(msg, "ERROR No files to download\r\n");
                         send(client, msg, strlen(msg), 0);
                         close(client);
                         exit(0);
                     }
 
-                    int ret = recv(client, buf, sizeof(buf)-1, 0);
-                    if (ret <= -1){
-                        perror("recv() failed");
-                        close(client);
-                        exit(1);
-                    } else if (ret==0){
-                        printf("client disconnected\n");
-                        close(client);
-                        exit(0);
-                    } else {
-                        buf[ret-1] = 0;
-                        printf("Received from %d: %s\n", client, buf);
-
-                        if (strcmp(buf, "exit")==0){
-                            strcpy(msg, "");
-                            get_time_to_buf(msg, "default");
-                            strcat(msg, " Bye Bye.\n");
-                            send(client, msg, strlen(msg), 0);
-
+                    while (1){
+                        int ret = recv(client, buf, sizeof(buf)-1, 0);
+                        if (ret <= -1){
+                            perror("recv() failed");
+                            close(client);
+                            exit(1);
+                        } else if (ret==0){
+                            printf("client disconnected\n");
                             close(client);
                             exit(0);
                         } else {
-                            char file_name[32], tmp[32];
-                            ret = sscanf(buf, "%s%s", file_name, tmp);
-                            if (ret==1){
-                                
-                            } else {
+                            buf[ret-1] = 0;
+                            printf("Received from %d: %s\n", client, buf);
+
+                            if (strcmp(buf, "exit")==0){
                                 strcpy(msg, "");
                                 // get_time_to_buf(msg, "default");
-                                strcat(msg, "Wrong usage. Usage: GET_TIME [format].\n");
-                                
+                                strcat(msg, " Bye Bye.\n");
                                 send(client, msg, strlen(msg), 0);
+
+                                close(client);
+                                exit(0);
+                            } else {
+                                char file_name[32], tmp[32];
+                                ret = sscanf(buf, "%s%s", file_name, tmp);
+                                if (ret==1){
+                                    FILE *f = fopen(buf, "rb");
+                                    if (f==NULL){
+                                        strcpy(msg, "");
+                                        strcat(msg, "ERROR Can't open file.\n");
+                                        send(client, msg, strlen(msg), 0);
+                                    } else {
+                                        fseek(f, 0, SEEK_END);
+                                        long file_size = ftell(f);
+                                        fseek(f, 0, SEEK_SET);
+
+                                        sprintf(buf, "OK %ld\r\n", file_size);
+                                        send(client, buf, strlen(buf), 0);
+                                        
+                                        while (1){
+                                            ret = fread(buf, 1, sizeof(buf), f);
+                                            if (ret<=0){
+                                                printf("End of file.\n");
+                                                break;
+                                            }
+                                            send(client, buf, ret, 0);
+                                        }
+                                        
+                                        fclose(f);
+                                        break;
+                                    }
+
+
+                                } else {
+                                    strcpy(msg, "");
+                                    // get_time_to_buf(msg, "default");
+                                    strcat(msg, "Wrong usage.\n");
+                                    
+                                    send(client, msg, strlen(msg), 0);
+                                }
                             }
-                    //         if (ret==2&&strcmp(cmd, "GET_TIME")==0){
-                    //             if (is_format(format)==-1){
-                    //                 strcpy(msg, "");
-                    //                 get_time_to_buf(msg, "default");
-                    //                 strcat(msg, " Wrong format. Types of format:\n");
-                    //                 strcat(msg, " - dd/mm/yyyy\n");
-                    //                 strcat(msg, " - dd/mm/yy\n");
-                    //                 strcat(msg, " - mm/dd/yyyy\n");
-                    //                 strcat(msg, " - mm/dd/yy\n");
-                    //                 send(client, msg, strlen(msg), 0);
-                    //             } else {
-                    //                 strcpy(msg, "");
-                    //                 get_time_to_buf(msg, format);
-                    //                 send(client, msg, strlen(msg), 0);
-                    //                 printf("done\n");
-                    //                 close(client);
-                    //                 exit(0);
-                    //             }
-                    //         } else {
-                    //         }
                         }
                     }
                 }

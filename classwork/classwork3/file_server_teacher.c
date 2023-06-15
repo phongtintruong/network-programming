@@ -8,6 +8,8 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/wait.h>
+#define _DEFAULT_SOURCE
+
 #include <dirent.h>
 
 void signalHandler(int signo)
