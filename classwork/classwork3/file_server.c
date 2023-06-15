@@ -85,6 +85,28 @@ int main(int argc, char *argv[]){
         perror("listen() failed");
         return 1;
     }
+    
+    char *file_list = malloc(1);
+    file_list[0] = '\0';
+
+    DIR *dir = opendir(search_dir);
+    if (dir==NULL){
+        perror("Failed to open dir");
+        return 1;
+    }
+
+    struct dirent *entry;
+    int count=0;
+    char count_str[20];
+    while ((entry = readdir(dir))!=NULL){
+        if (entry->d_type==DT_REG){
+            count++;
+            file_list = realloc(file_list, strlen(file_list)+strlen(entry->d_name)+3);
+            strcat(file_list, entry->d_name);
+            strcat(file_list, "\r\n");
+        }
+    }
+    closedir(dir);
 
     printf("Server started. Waiting for connections...\n");
 
@@ -109,34 +131,20 @@ int main(int argc, char *argv[]){
             } else {
                 printf("New user connected: %d\n", client);
                 client_count++;
-                    
+
                 if (fork()==0){
                     close(listener);
 
                     char msg[256]="", buf[256]="";
-                    char *file_list = malloc(1);
-                    file_list = "\0";
 
-
-                    DIR *dir = opendir(search_dir);
-                    struct dirent *entry;
-                    int count=0;
-                    char count_str[20];
-                    while ((entry = readdir(dir))!=NULL){
-                        if (entry->d_type==DT_REG){
-                            count++;
-                            file_list = realloc(file_list, strlen(file_list)+strlen(entry->d_name)+3);
-                            strcat(file_list, entry->d_name);
-                            strcat(file_list, "\r\n");
-                        }
-                    }
-                    closedir(dir);
                     if (count>0){
                         sprintf(count_str, "%d", count);
+                        strcpy(msg, "");
                         strcat(file_list, "\r\n");
                         strcat(msg, "OK ");
                         strcat(msg, count_str);
                         strcat(msg, "\r\n");
+                        strcat(msg, file_list);
                         send(client, msg, strlen(msg), 0);
                     } else {
                         printf("nofile\n");
@@ -209,6 +217,8 @@ int main(int argc, char *argv[]){
                             }
                         }
                     }
+                    close(client);
+                    exit(0);
                 }
                 close(client);
             }
